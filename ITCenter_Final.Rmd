@@ -1,0 +1,553 @@
+---
+title: "IT Center Group Project"
+author: "Yitong Tang, Immanuel Kraft & Alexander Atzberger"
+date: "30 January 2020"
+site: "bookdown::bookdown_site"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+  bookdown::html_document2:
+    fig_caption: yes
+    fig_height: 3
+    fig_width: 6
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+  bookdown::pdf_document2:
+    fig_caption: yes
+    fig_height: 3
+    fig_width: 6
+    number_sections: yes
+    toc: yes
+  bookdown::word_document2:
+    fig_caption: yes
+    fig_height: 3
+    fig_width: 6
+    toc: yes
+csl: apa.csl
+bibliography:
+- Rrefsbib.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library (ggplot2)
+library(dplyr)
+library(lubridate)
+library(citr)
+library(bibtex)
+library(plotly)
+library(prettydoc)
+library(igraph)
+library(networkD3)
+knitr::write_bib(c("tidyverse", "ggplot2","dplyr", "lubridate", "citr", "bibtex", "plotly", "prettydoc", "networkD3", "igraph"), file = "Rrefsbib.bib")
+```
+
+# Introduction of the data
+We examined the employee behaviour of a Chicago based IT Call Center office. 28 employees at the firm were examined, of which 23 participated in the study. Nineteen-hundred hours of data were collected, with a median of 80 hours per employee. The resulting data document the performance of computer system configuration tasks assigned to employees on a first-come, first-served basis. These configurations were rated to one of three levels of difficulty (basic, complex, or advanced) based on the configuration characteristics. At the conclusion of the task, the employee submitted the completed configuration as well as the price back to the salesman, after which the employee moved to the back of the queue for task assignment.
+
+To conduct analysis on the data set, we decided to zoom in on the week before and right after the Easter holiday break in a time frame from 09:00-17:00. All subjects across all three departments (Pricing, Configuration & Management) were utilized, examining their task behaviour, with closely examining the closing time, complexity and movement across departments between the two weeks. Questions about the generalizability arise when examining the data: only two weeks among employees were compared, there are potentially more confounding variables that influence the outcomes of the presented visualizations.
+
+In the project following R packages were used: `tidyverse` [@R-tidyverse], `lubridate` [@R-lubridate], `dplyr` [@R-dplyr], `citr` [@R-citr], `bibtex` [@R-bibtex], `plotly` [@R-plotly], `igraph` [@R-igraph], `networkD3` [@R-networkD3] and `prettydoc` [@R-prettydoc].
+
+<center> ![IT Center Office Layout](ITCenter_OfficeLayout.png)</center>
+
+The layout of the workspace is shown in the figure above. Participating employees are indicated at their cubicles by their badge IDs; different colors behind the IDs represent different departmental branches at the firm. Non-participating employees have letter “N” at their cubicles. Employees fetched their badges from the room containing base station 1 (located at the lower left corner) at approximately 9am each weekday morning, and returned the badges to this room at around 6pm in the evening. The RSSI regions were manually assigned to identify different regions in the workspace, and do not correspond to any particular sensors deployed in this experiment.
+
+```{r}
+Bagdge<-read_csv("BadgeAssignment.csv")
+IR<-read_csv("IR.csv")
+Location<-read_csv("LocationTrackingEvery1Minute.csv")
+Transaction<-read_csv("Transactions.csv")
+```
+
+# Tidy Data  
+In order to conduct a meaningful analysis, we tidied the data. The core of the analysis of the data is to compare the week before the Easter Break 2007 with the week right after, selecting observations from **02.-06 and April 2007 - 23. - 27. April 2007**. In a subsequent step, we separated the `date.time` variable into seperate `date` and `time` variables and created two sepearte new data frames for the `IR`, `Transaction` and `Location` data frames, resulting in a total of *six* explored data frames. In the final step, we removed all the missing values and duplicate values from the active datasets.
+
+```{r}
+Location_new<-Location%>%
+  separate(time, into= c("date", "time"), sep=" ") # change of date.time variable
+
+location_first_week <- filter(Location_new, date>="2007-04-02", date<="2007-04-06" & time>"09:00:00", time<"17:00:00")
+
+location_second_week <- filter(Location_new, date>="2007-04-09", date<="2007-04-13" & time>"09:00:00", time<"17:00:00")
+```
+
+```{r}
+location_first_week <- location_first_week %>% # New data frame creation
+mutate(time2= parse_time(time, "%H:%M:%S"))
+
+location_first_week <-location_first_week%>%
+  mutate(date2= parse_date(date, "%Y-%m-%d"))
+
+location_second_week <- location_second_week %>% 
+mutate(time2= parse_time(time, "%H:%M:%S"))
+
+location_second_week <- location_second_week%>%
+  mutate(date2= parse_date(date, "%Y-%m-%d"))
+```
+
+```{r}
+IR_new<-IR%>% filter(sender.id != "0" & sender.id != "108")%>%
+  filter(local.id != "0" & local.id != "108")%>%
+  separate(date.time, into = c("date", "time"), sep=" ")
+ # change of date.time variable
+
+IR_first_week <- filter(IR_new, date>="2007-04-02", date<="2007-04-06" & time>"09:00:00", time<"17:00:00")
+
+IR_second_week <- filter(IR_new, date>="2007-04-09", date<="2007-04-13" & time>"09:00:00", time<"17:00:00")
+```
+
+```{r}
+IR_first_week <- IR_first_week %>% # change into date and time format
+mutate(time2= parse_time(time, "%H:%M:%S"))
+
+IR_first_week<- IR_first_week %>%
+  mutate(date2= parse_date(date, "%Y-%m-%d"))
+
+IR_first_week <- IR_first_week[!duplicated(IR_first_week$time), ]
+
+IR_second_week <- IR_second_week %>%
+mutate(time2= parse_time(time, "%H:%M:%S"))
+
+IR_second_week<- IR_second_week %>%
+  mutate(date2= parse_date(date, "%Y-%m-%d"))
+
+IR_second_week <- IR_second_week[!duplicated(IR_second_week$time), ]
+
+```
+
+```{r}
+Transaction_new <- Transaction%>%
+  separate(date, into = c("date", "time"), sep = " ") # change of date.time variable
+  
+Transaction_first_week <- filter(Transaction_new, date>="2007-04-02", date<="2007-04-06" & time>"09:00:00", time<"17:00:00")
+
+Transaction_second_week <- filter(Transaction_new, date>="2007-04-09", date<="2007-04-13" & time>"09:00:00", time<"17:00:00")
+```
+
+```{r}
+Transaction_first_week <- Transaction_first_week  %>% # New data frame creation
+mutate(time2= parse_time(time, "%H:%M:%S"))
+
+Transaction_first_week <- Transaction_first_week %>%
+  mutate(date2= parse_date(date, "%Y-%m-%d"))
+
+Transaction_second_week <- Transaction_second_week  %>%
+mutate(time2= parse_time(time, "%H:%M:%S"))
+
+Transaction_second_week <- Transaction_second_week %>%
+  mutate(date2= parse_date(date, "%Y-%m-%d"))
+```
+
+```{r}
+Transaction_clean_first <- Transaction_first_week %>% # Removing missing values
+  filter(Transaction_first_week$employee == sub("^N","",Transaction_first_week$employee))%>%
+   filter(duration >= 0) %>%
+  select(-time, -date)
+
+Transaction_clean_second <- Transaction_second_week %>% 
+    filter(Transaction_second_week$employee == sub("^N","",Transaction_second_week$employee))%>%
+  filter(duration >= 0) %>%
+  select(-time, -date)
+
+```
+
+# Data Frames & Primary Keys 
+
+**Location** <br />
+The dataset location describes the coordinates of the workers and their position in the office at a certain point in time and how they move across the building. The dataset tracks the movement every minute and shows the location. **There is no primary key in this data set because an employee might stay at a location for longer than one minute.**
+
+**Transaction** <br />
+The dataset transaction shows information on the individual employee, including what job they have (configuration/pricing), the task complexity, the amount of follow ups and how long they took to close a task. There is one primary key: the combination of the variables transact + employee + phase forms a primary key.
+
+**IR** <br />
+The IR dataset indicates when an employee is close to another employee and/or an anchor node. As it shows the movement track of one ID in every minute. in every exact time, one sender is contacting with an only person. Thus we conclude that we identified the primary key:  sender.id + date + time.
+
+**Primary Keys for Transaction and IR**
+```{r}
+location_first_week %>% select(id, date, time) %>% anyDuplicated() 
+location_second_week %>% select(id, date, time) %>% anyDuplicated()
+
+Transaction_first_week %>% select(transact,employee,phase) %>% anyDuplicated()
+Transaction_second_week%>% select(transact,employee,phase) %>% anyDuplicated()
+
+IR_first_week %>% select(sender.id, date,time) %>% anyDuplicated()
+IR_second_week %>% select(sender.id, date,time) %>% anyDuplicated() 
+
+```
+# Data Joins & Foreign Keys 
+
+We identified the foreign keys in the datasets:
+
+1. `employee`, `date2`, `time2` in Transaction_clean_first <br />
+2. `employee`, `date2`, `time2` in Transaction_clean_second <br />
+3. `id`,`date2`, `time2` in location_first_week  <br />
+4. `id`,`date2`, `time2` in location_second_week  <br />
+5. `sender.id`,`date`,`time`(or `local.id`,`date`,`time`) in IR_first_week_j  <br />
+6. `sender.id`,`date`,`time`(or `local.id`,`date`,`time`) in IR_second_week_j  <br />
+
+```{r echo=FALSE, results="hide"}
+Transaction_clean_first$employee <- as.numeric(Transaction_clean_first $employee)
+Trans_Loc_1 <- Transaction_clean_first %>% left_join(location_first_week, by = c("employee"= "id","date2" = "date2", "time2"= "time2"))
+Trans_Loc_1
+
+Transaction_clean_second$employee <- as.numeric(Transaction_clean_second $employee)
+Trans_Loc_2 <- Transaction_clean_second %>% left_join(location_second_week, by = c("employee"= "id","date2" = "date2", "time2"= "time2"))
+Trans_Loc_2
+
+# As the IR accurates to seconds, we change the dataframe to make it accurates to minute, and then we can combine IR with Location to explore the sender and the local's movement 
+
+#for the first week 
+IR_first_week_j <- IR_first_week %>% mutate(t_without_s = paste(IR_first_week$date2, IR_first_week$time2))%>%select(-date, -time)%>% mutate(t_without_s = floor_date(as.POSIXct(t_without_s),'minute'))%>%
+  separate(t_without_s, into= c("date", "time"), sep=" ")
+
+# combine combine IR with Location to explore the sender
+IR_first_week_j  <- IR_first_week_j %>% mutate(time= parse_time(time, "%H:%M:%S"), date= parse_date(date, "%Y-%m-%d"))
+
+IR_Loc_1 <- IR_first_week_j %>% left_join(location_first_week, by = c("sender.id"= "id","date" = "date2", "time"= "time2"))
+IR_Loc_1
+# The location did not offer all the coordinates of the senders. here we sort out NA, and we got the coordinate of the senders which has the records.
+IR_LOC_1_Sender <- IR_Loc_1[complete.cases(IR_Loc_1),]
+
+IR_Loc_1 <- IR_first_week_j %>% left_join(location_first_week, by = c("local.id"= "id","date" = "date2", "time"= "time2"))
+IR_Loc_1
+IR_LOC_1_local <- IR_Loc_1[complete.cases(IR_Loc_1),]
+
+
+#for the second week 
+IR_second_week_j <- IR_second_week %>% mutate(t_without_s = paste(IR_second_week$date2, IR_second_week$time2))%>%select(-date, -time)%>% mutate(t_without_s = floor_date(as.POSIXct(t_without_s),'minute'))%>%
+  separate(t_without_s, into= c("date", "time"), sep=" ")
+
+# combine combine IR with Location to explore the sender
+IR_second_week_j  <- IR_second_week_j %>% mutate(time= parse_time(time, "%H:%M:%S"), date= parse_date(date, "%Y-%m-%d"))
+
+IR_Loc_2 <- IR_second_week_j %>% left_join(location_second_week, by = c("sender.id"= "id","date" = "date2", "time"= "time2"))
+IR_Loc_2
+# The location did not offer all the coordinates of the senders. here we sort out NA, and we got the coordinate of the senders which has the records.
+IR_LOC_2_Sender <- IR_Loc_2[complete.cases(IR_Loc_2),]
+
+IR_Loc_2 <- IR_first_week_j %>% left_join(location_first_week, by = c("local.id"= "id","date" = "date2", "time"= "time2"))
+IR_Loc_2
+IR_LOC_2_local <- IR_Loc_1[complete.cases(IR_Loc_2),]
+```
+
+# Data Joins & Relationships between tables
+
+Enclosed we display the verification process of the relationships in the data. In order to examine the relationships, we checked the joint key first, to see whether the joint key is duplicated. In our data frames, all of our joint keys we utilized appeared more than once, creating a “many-to" relationship. Subsequently, we utilized the `anti_join` function to check the number of mismatches and duplicates. The duplication of keys indicates the “to-many” relation of the data. Our relations between tables are displayed below.
+
+1. The relation between `Transaction_clean_first` and `location_first_week` is many-to-many <br />
+2. the relation between `Transaction_clean_second` and `location_second_week`  is many-to-many <br />
+3. the relation between `IR_first_week_j` and `location_first_week` is many-to-many <br />
+4. the relation between `IR_second_week_j` and `location_second_week` is many-to-many <br />
+
+```{r echo=FALSE, results="hide"}
+
+location_first_week%>% count(id,time2,date2) %>% summarise(max_repetitions = max(n)) # Transaction and location: we combine the two data sets through the key of : "employee"= "id","date2" = "date2", "time2"= "time2". The answer is 10, so the forign key value does not appear only once. 
+
+Transaction_clean_first %>% count(employee,time2,date2) %>% summarise(max_repetitions = max(n)) # the answer is 2, the forign key value does not appear only once.
+
+test1 <- Transaction_clean_first  %>% anti_join(location_first_week, by = c("employee"= "id","date2" = "date2", "time2"= "time2")) %>% count() # here we check the anti_join between the two data sets number of mismatches 
+
+test2<- location_first_week %>% anti_join(Transaction_clean_first, by = c("id"= "employee","date2" = "date2", "time2"= "time2")) %>% count() #number of mismatches 
+
+IR_first_week_j %>% count(sender.id,time,date) %>% summarise(max_repetitions = max(n)) # Location and IR
+
+location_first_week %>% count(id,time,date) %>% summarise(max_repetitions = max(n)) # both of the keys are not primary key. They appear more than one time. 
+
+test3<- IR_first_week_j  %>% anti_join(location_first_week, by = c("sender.id"= "id","date" = "date2", "time"= "time2")) %>% count()
+
+test4 <- location_first_week%>% anti_join(IR_first_week_j, by = c("id"= "sender.id","date2" = "date", "time2"= "time")) %>% count()
+
+test5 <- location_second_week%>% anti_join(IR_second_week_j, by = c("id"= "sender.id","date2" = "date", "time2"= "time")) %>% count() # we use the same method to check our data frame in the second week, and there are "many to many" relations.
+```
+# Floorplan
+
+<center> ![IT Center Office Layout](ITCenter_OfficeLayout.png)</center>
+
+# Interaction between two specific employees in one week
+**by Yitong Tang**
+
+In this plot, I want to explore the interaction between two specific employees in one week. The width of the links between two points show the frequency of the interaction, the colour of the points shows the roles of them, and the name on the points show each employee's ID.
+
+*Conclusion*<br />
+if we check the data set by role: the employees conducting the same row have more interaction with each other: we can find the green points are crowded together, and the light blue points(configuration) are crowded together. the employees in the role of coordinator do not interact with other colleagues that much. People conducting the same role have good interaction with their group members. For example, all of the people in Pricing role have a link with the rest of pricing people other than 272.
+
+From the perspective of every specific employee, we can find the most frequent interactions happen between employee 292 and 263. Different from many employees who only interact with the people in the same roles. 292 and 263 interact with various roles. so we can suppose 292 and 263 are gathering information from their group members and transfer the idea to the other role. On the other hand, several employees seldom contact with the colleague: 109 106 253 261. all of them have only one link with the group. However, I think the link is very important because the point they link with is an information-gathering point. For instance, 261 connect with 292, which is an information centre; 253 connect with 290, which also links with many other employees.
+
+From the perspective of "base station" we can find the kitchen is the most popular space, where 15 employees have been there in this week, most of the employee is in the role of configuration. compared with them, the base station of coffee is the most popular place for the employee in the pricing role. The copy space mainly links with 99 and 285, so we can guess 285 and 99 take the task of copying or they have many materials to be copied.
+
+```{r}
+# I will use force network() to make the plot, according to the requirement, I need to prepare two data frames: one describe the edges, containing the "source","target","value"; the other describes the nodes, containing the name, group and the size of the nodes.
+
+# for the edge value: calculate the repeat times of each interaction between two specific employees.
+IR_first_week_j_grouped<-IR_first_week_j%>%
+group_by( sender.id, local.id,date2) %>%
+summarise(n= n()) %>% arrange(date2, n )
+datalink <- IR_first_week_j_grouped
+# for the nodes name:
+data1 <- data_frame(
+nodes = unique (c(unique(IR_first_week_j $sender.id), unique(IR_first_week_j $local.id))))
+# for the nodes group:
+Bagdge$BID <- as.numeric(Bagdge$BID)
+data1<-data1 %>% left_join(Bagdge, by = c("nodes" = "BID"))
+notes1<-data1%>% filter(role != "RSSI")
+# the edge "source" and "target" means two numeric vector starts from 0. As the raw data we have are "the name of the two interaction", rather than numeric vector. I decide to use a list of number to present the names of IDs.
+q = nrow(notes1)
+nodes1 <- notes1 %>% mutate(order = 0:(q-1))
+data1$nodes <- as.numeric(data1$nodes)
+
+datalink <-IR_first_week_j_grouped %>% select(sender.id, local.id, n)
+datalink$sender.id <- as.numeric(datalink$sender.id )
+datalink$local.id <- as.numeric(datalink$local.id )
+nodes1$nodes <- as.numeric(nodes1$nodes)
+
+link1 <- datalink %>% left_join(nodes1, by = c( "sender.id" = "nodes"))
+link2 <- link1 %>% left_join(nodes1, by = c("local.id" ="nodes"))
+link2 <- link2 %>% select(sender.id, local.id, order.x,order.y,n)
+# I think it is important to have the data about "space", because it shows the public gather space of the employees. however, as the data are just showed on the map rather than in a dataframe, so I have to change their name manually.
+nodes1 <- nodes1 %>%
+mutate(nodes=replace(nodes, nodes==13,"Kitchen")) %>%
+mutate(nodes=replace(nodes, nodes==27, "printers"))%>%
+mutate(nodes=replace(nodes, nodes==35, "copyspace"))%>%
+mutate(nodes=replace(nodes, nodes==20, "coffee"))%>%
+mutate(nodes=replace(nodes, nodes==2, "office"))%>%
+mutate(nodes=replace(nodes, nodes==16, "nearcoffee"))%>%
+mutate(nodes=replace(nodes, nodes==81, "nearkitchen"))%>%
+mutate(nodes=replace(nodes, nodes==46, "nearmeetingroom"))%>%
+as.data.frame()
+
+forceNetwork(Links = link2,
+Nodes = nodes1,
+Source = "order.x",
+Target = "order.y",
+Value = "n",
+NodeID = "nodes",
+Group = "role",
+fontSize = 20,
+linkColour="black",
+charge = -100,
+opacity = 1,
+legend=T,
+arrows=F,
+bounded=F,
+opacityNoHover=1.0,
+zoom = T)
+
+```
+
+
+# Tracking the movement of employees by follow ups across two weeks 
+**by Immanuel Kraft**
+
+Since the given data set includes a lot of information of how different departments and employees move the following graphs should emphasize this. The first graph shows movement during the week before Easter and the second graph shows movement during the week after Easter.  
+
+Companies often have some deadlines or projects to complete before the holidays. Therefore the movement before Easter as well as after Easter was considered and if there are significant differences between the two departments. The graph should also show if there are differences in the number of follow ups, which means how often people exchange before they close an task. 
+
+To show this, an animated scatter diagram was chosen, which shows the different movement patterns from Monday to Friday. 
+The x- and y-axis show the coordinates of the office, the color differs between the departments "Configuration" and "Pricing", the size of the points shows the frequency of the follow ups. 
+
+**First Week**
+
+The main results are that during the first week people working in Configuration hardly move to other departments, while Pricing moves throughout the office. If there is an exchange between departments, it always takes place in the Configuration Department or in the meeting rooms below. If you look at the follow-ups, they are evenly distributed between the departments. It is also interesting to note that on the last day of the week the Pricing Department was most likely already off duty, as there is no record of movement. 
+
+**Second Week**
+
+Looking at the second graph, it is noticeable that there is less movement overall than in the first week. Also the Pricing Department shows no movement at all, which might be related to the fact that the department was closed for holidays. The Configuration Department also moves only in its own "zone". Apart from the last day of the week, they are never in a meeting room at any time.
+
+The observation suggests that there was actually more exchange between the employees before Easter and that meetings were scheduled more often in the first week. Since there was less movement during the second week one might conclude, that employees have more stress before public holidays and they try to finish their projects. Another interssting finding ist, that the pricing team moves all over the office, while the configuration team stays in their own department. The Management coud think weather it is still worthwhile to have permanent working tables for the pricing employees or if a more open approach would make more sense.
+
+```{r}
+Transaction_clean_first$employee <- as.numeric(Transaction_clean_first$employee)
+
+trans_loc_first_week <- Transaction_clean_first%>%
+  left_join(location_first_week, by=c("employee" = "id","date2"="date2", "time2"= "time2"))
+
+Transaction_clean_second$employee <- as.numeric(Transaction_clean_second$employee)
+
+trans_loc_second_week <- Transaction_clean_second%>%
+  left_join(location_second_week, by=c("employee" = "id","date2"="date2", "time2"= "time2"))
+```
+
+# Week 1
+```{r}
+trans_loc_first_week %>%
+  filter(!is.na(x), !is.na(y)) %>% #filtering the missing cases
+  plot_ly(
+    x = ~x, 
+    y = ~y,
+    frame = ~date2,
+    color = ~role,
+    size =~n.follow.ups,
+    text= ~n.follow.ups,
+    hoverinfo = "text",
+    type = 'scatter',
+    mode = 'markers',
+    width = 800, 
+    height = 550
+  ) %>% 
+  animation_opts(
+    5000, easing = "elastic"
+  ) %>%
+  animation_slider(
+    currentvalue = list(prefix = "DATE: ", font = list(color="red"))
+  ) %>%
+  layout(title = "Movement of the first week by role and follow ups",
+          yaxis = list(
+      title = "y-coordinates"),
+       xaxis = list(
+      title = "x-coordinates")
+      ) 
+```
+
+# Week 2
+
+```{r}
+trans_loc_second_week %>%
+  filter(!is.na(x), !is.na(y)) %>% #filtering the missing cases
+   plot_ly(
+    x = ~x, 
+    y = ~y,
+    frame = ~date2,
+    color = ~role,
+    size= ~n.follow.ups,
+    text= ~n.follow.ups,
+    hoverinfo = "text",
+    type = 'scatter',
+    mode = 'markers',
+     width = 800, 
+    height = 550
+  ) %>% 
+  animation_opts(
+    5000, easing = "elastic"
+  ) %>%
+  animation_slider(
+    currentvalue = list(prefix = "DATE: ", font = list(color="red"))
+  )%>%
+  layout(title = "Movement of the second week by role and follow ups",
+          yaxis = list(
+      title = "y-coordinates"),
+       xaxis = list(
+      title = "x-coordinates"))
+
+```
+
+
+# Tracking the movement of the most productive employees across two weeks 
+**by Alexander M. Atzberger**<br />
+
+A key psychological hypothesis behind organizational theory is transactive memory: an organization coping with complex tasks often needs a knowledge repertoire far beyond the memory capacity and reliability of any individual in this organization. Individuals collaborate to store this total repertoire by identifying the expertise of one another and distributing the repertoire among themselves. The employees indicated that the configuration and pricing tasks were information-intensive, and therefore required them to talk to one another to fully understand the various specifications. Thus, the researchers that provided the data expected a positive correlation between the rate of problem-solving by an employee and the number of places visited by that employee, displaying that employees talk to their colleagues.
+
+In my visualization, I compare the two most productive employees of the two departments *pricing* and *configuration* and compare the relationship between closed calls and which department has moved the most across the office.
+
+The bar charts implies how many problems the two departments solved in the two compared weeks, with the department on the x-axis and frequency of solved calls on the y axis.
+
+The jitter plots below the bar charts display the pathways that each employee (grouped by department) took in each of the compared weeks. The x and y axis represent the coordinates of the office layout. The two colors represent the two different departments.
+
+*Conclusion*<br />
+Overall, the employees from the IT Call Center had a more productive week in the week before the Easter break. In Week 1, the *configuration department* closed 23 calls, the pricing department closed 36 calls. In Week 2, the *configuration department* closed 15 calls, the pricing department closed 21 calls.The employees of the pricing department close more calls than the configuration department in the first week and move more across the office space. Interestingly, in the second week, the employees of the pricing department again closes more calls during the week, but move significantly less across the office. This finding challenges the researchers initial assumption of the positive correlation between task closing and movement across the office. Regardless, the results of the visualization need to be interpreted with caution, as observations from a two week time frame with a holiday in between pose difficulties for the external validity of the findings: there are a number of potential correlating factors that potentially explain the results.
+
+```{r echo=FALSE, results="hide"}
+# Correlation between the rate of problem-solving by an employee and the number of places visited by that employee, find the two most prolific workers from both departments and display their locations
+
+Transaction1_ProlificWorker <- filter(Transaction_clean_first, phase=="closed") # Week 1
+
+Transaction1_ProlificWorker$employee <- as.numeric(Transaction1_ProlificWorker$employee) # transform role into numeric Week 1
+
+Transaction2_ProlificWorker <- filter(Transaction_second_week, phase=="closed") #Week 2
+
+Transaction2_ProlificWorker$employee <- as.numeric(Transaction2_ProlificWorker$employee) # transform role into numeric Week 2
+
+location_1_week <- rename(location_first_week, employee = id) #create matching keys
+
+location_2_week <- rename(location_second_week, employee = id) #create matching keys
+
+count(Transaction1_ProlificWorker, role, phase, employee) # Find the two most prolific workers from configuration and pricing Week 1
+
+count(Transaction2_ProlificWorker, role, phase, employee) # Find the two most prolific workers from configuration and pricing Week 2
+
+Transaction1_ProlificWorker <- filter(Transaction1_ProlificWorker, employee %in% c(99, 263, 268, 256)) # In the configuration department, employee #99 closed 11 calls, employee #256 closed 12 calls, in the pricing department, employee #263 closed 22 calls and employee #268 closed 14 calls in Week 1.
+
+Transaction2_ProlificWorker <- filter(Transaction2_ProlificWorker, employee %in% c(99, 263, 268, 256)) # In the configuration department, employee #99 closed 4 calls, employee #256 closed 11 calls, in the pricing department, employee #263 closed 10 calls and employee #268 closed 11 calls in Week 1. Configuration, Employee #297, 12 closed calls in week 2, Pricing
+
+Location1_Prolific <- filter(location_1_week, employee %in% c(99, 263, 268, 256))
+
+Location2_Prolific <- filter(location_2_week, employee %in% c(99, 263, 268, 256)) 
+
+JoinedTable1Prolific <- left_join(Transaction1_ProlificWorker, Location1_Prolific, by = "employee")#Week1
+
+JoinedTable1Prolific$employee <- as.factor(JoinedTable1Prolific$employee)
+
+JoinedTable2Prolific <- left_join(Transaction2_ProlificWorker, Location2_Prolific, by = "employee") #Problem here
+
+JoinedTable2Prolific$employee <- as.factor(JoinedTable2Prolific$employee)
+```
+# Week 1
+```{r, fig.show='hold'}
+
+na.omit(Transaction1_ProlificWorker) %>% #plot total amount of closed calls by department Week 2
+  group_by(role) %>%
+  summarise(counts=n()) %>%
+  ggplot(aes(x=role, y=counts, color=role,)) +
+  geom_bar(stat = "identity", fill="grey") +
+  labs(title = "Number of closed calls by department", 
+    x = "Department", 
+    y = "# of closed calls",
+    color="Employee Department") +
+  theme_light(base_size = 10) +
+  theme(legend.position = "bottom") + 
+  ylim(0,40)
+
+na.omit(JoinedTable1Prolific)%>% # Run Visualization jitter Week 1
+  ggplot(aes(
+    x=x, 
+    y=y, 
+    color=role, 
+    na.rm=TRUE)) +
+  geom_jitter(aes()) +
+  labs(title = "Employee movement across the office Week 1 by department", 
+    x = "Office Floorplan x-Coordinate", 
+    y = "Office Floorplan y-Coordinate", 
+    color="Employee Department") +
+  theme_linedraw(base_size = 10) +
+  theme(legend.position = "bottom")
+```
+
+# Week 2
+
+```{r, fig.show='hold'}
+na.omit(Transaction2_ProlificWorker) %>% #plot total amount of closed calls by department Week 2
+  group_by(role) %>%
+  summarise(counts=n()) %>%
+  ggplot(aes(x=role, y=counts, color=role)) +
+  geom_bar(stat = "identity", fill="white") +
+  labs(title = "Number of closed calls by department", 
+    x = "Department", 
+    y = "# of closed calls",
+    color="Employee Department") +
+  theme_gray(base_size = 10) +
+  theme(legend.position = "bottom") + 
+  ylim(0,40)
+
+na.omit(JoinedTable2Prolific)%>% # Run Visualization jitter Week 2
+  ggplot(aes(
+    x=x, 
+    y=y, 
+    color=role,
+    na.rm=TRUE)) +
+  geom_jitter(aes()) +
+   labs(title = "Employee movement across the office Week 2 by department", 
+     x = "Office Floorplan x-Coordinate", 
+     y = "Office Floorplan y-Coordinate",
+     color="Employee Department") +
+  theme_gray(base_size = 10) +
+  theme(legend.position = "bottom")
+```
+
+
+# References {-}
